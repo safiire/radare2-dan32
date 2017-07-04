@@ -1,0 +1,1022 @@
+diff --git a/libr/anal/p/Makefile b/libr/anal/p/Makefile
+index 11bb802..be8806c 100644
+--- a/libr/anal/p/Makefile
++++ b/libr/anal/p/Makefile
+@@ -12,7 +12,7 @@ all: ${ALL_TARGETS} ;
+ 
+ ALL_TARGETS=
+ # TODO: rename to enabled plugins
+-ARCHS=null.mk x86_udis.mk ppc_gnu.mk ppc_cs.mk arm_gnu.mk avr.mk xap.mk dalvik.mk sh.mk ebc.mk gb.mk malbolge.mk ws.mk h8300.mk cr16.mk v850.mk msp430.mk sparc_gnu.mk sparc_cs.mk x86_cs.mk cris.mk 6502.mk snes.mk riscv.mk vax.mk xtensa.mk rsp.mk
++ARCHS=null.mk x86_udis.mk ppc_gnu.mk ppc_cs.mk arm_gnu.mk avr.mk xap.mk dalvik.mk sh.mk ebc.mk dan32.mk gb.mk malbolge.mk ws.mk h8300.mk cr16.mk v850.mk msp430.mk sparc_gnu.mk sparc_cs.mk x86_cs.mk cris.mk 6502.mk snes.mk riscv.mk vax.mk xtensa.mk rsp.mk
+ include $(ARCHS)
+ 
+ clean:
+diff --git a/libr/anal/p/anal_dan32.c b/libr/anal/p/anal_dan32.c
+new file mode 100644
+index 0000000..e094499
+--- /dev/null
++++ b/libr/anal/p/anal_dan32.c
+@@ -0,0 +1,390 @@
++#include <string.h>
++#include <r_types.h>
++#include <r_lib.h>
++#include <r_asm.h>
++#include <r_anal.h>
++
++#define EIP (63)
++#define ESP (62)
++#define SIX_BIT (077)
++#define DAN32_DISK (0x200000)
++#define DAN32_SECTOR_SIZE (0x200)
++
++
++static int set_reg_profile(RAnal *anal) {
++  const char *p =
++  "=A0  r03\n"
++  "=A1  r04\n"
++  "=A2  r05\n"
++  "=LR  r59\n"
++  "=PC  r63\n"
++  "=SP  r62\n"
++  "gpr r00 .32   0 0\n gpr r01 .32   4 0\n gpr r02 .32   8 0\n gpr r03 .32  12 0\n gpr r04 .32  16 0\n gpr r05 .32  20 0\n gpr r06 .32  24 0\n gpr r07 .32  28 0\n"
++  "gpr r08 .32  32 0\n gpr r09 .32  36 0\n gpr r10 .32  40 0\n gpr r11 .32  44 0\n gpr r12 .32  48 0\n gpr r13 .32  52 0\n gpr r14 .32  56 0\n gpr r15 .32  60 0\n"
++  "gpr r16 .32  64 0\n gpr r17 .32  68 0\n gpr r18 .32  72 0\n gpr r19 .32  76 0\n gpr r20 .32  80 0\n gpr r21 .32  84 0\n gpr r22 .32  88 0\n gpr r23 .32  92 0\n"
++  "gpr r24 .32  96 0\n gpr r25 .32 100 0\n gpr r26 .32 104 0\n gpr r27 .32 108 0\n gpr r28 .32 112 0\n gpr r29 .32 116 0\n gpr r30 .32 120 0\n gpr r31 .32 124 0\n"
++  "gpr r32 .32 128 0\n gpr r33 .32 132 0\n gpr r34 .32 136 0\n gpr r35 .32 140 0\n gpr r36 .32 144 0\n gpr r37 .32 148 0\n gpr r38 .32 152 0\n gpr r39 .32 156 0\n"
++  "gpr r40 .32 160 0\n gpr r41 .32 164 0\n gpr r42 .32 168 0\n gpr r43 .32 172 0\n gpr r44 .32 176 0\n gpr r45 .32 180 0\n gpr r46 .32 184 0\n gpr r47 .32 188 0\n"
++  "gpr r48 .32 192 0\n gpr r49 .32 196 0\n gpr r50 .32 200 0\n gpr r51 .32 204 0\n gpr r52 .32 208 0\n gpr r53 .32 212 0\n gpr r54 .32 216 0\n gpr r55 .32 220 0\n"
++  "gpr r56 .32 224 0\n gpr r57 .32 228 0\n gpr r58 .32 232 0\n gpr r59 .32 236 0\n gpr r60 .32 240 0\n gpr r61 .32 244 0\n gpr r62 .32 248 0\n gpr r63 .32 252 0\n";
++  return r_reg_set_profile_string(anal->reg, p);
++}
++
++
++static const struct {
++  char *name;
++} regs[] = {
++  { "r00" }, { "r01"  }, { "r02" }, { "r03" }, { "r04" }, { "r05" }, { "r06" }, { "r07" },
++  { "r08" }, { "r09"  }, { "r10" }, { "r11" }, { "r12" }, { "r13" }, { "r14" }, { "r15" },
++  { "r16" }, { "r17"  }, { "r18" }, { "r19" }, { "r20" }, { "r21" }, { "r22" }, { "r23" },
++  { "r24" }, { "r25"  }, { "r26" }, { "r27" }, { "r28" }, { "r29" }, { "r30" }, { "r31" },
++  { "r32" }, { "r33"  }, { "r34" }, { "r35" }, { "r36" }, { "r37" }, { "r38" }, { "r39" },
++  { "r40" }, { "r41"  }, { "r42" }, { "r43" }, { "r44" }, { "r45" }, { "r46" }, { "r47" },
++  { "r48" }, { "r49"  }, { "r50" }, { "r51" }, { "r52" }, { "r53" }, { "r54" }, { "r55" },
++  { "r56" }, { "r57"  }, { "r58" }, { "r59" }, { "r60" }, { "r61" }, { "r62" }, { "r63" }
++};
++
++/*  Here is the Dan32 Instruction Set */
++enum {
++  Dan32_OP_Load_B,
++  Dan32_OP_Load_H,
++  Dan32_OP_Load_W,
++  Dan32_OP_Reserved_3,
++  Dan32_OP_Store_B,
++  Dan32_OP_Store_H,
++  Dan32_OP_Store_W,
++  Dan32_OP_Reserved_7,
++  Dan32_OP_Add,
++  Dan32_OP_Mul,
++  Dan32_OP_Div,
++  Dan32_OP_Nor,
++  Dan32_OP_Reserved_12,
++  Dan32_OP_Reserved_13,
++  Dan32_OP_Reserved_14,
++  Dan32_OP_Reserved_15,
++  Dan32_OP_MovI,
++  Dan32_OP_Reserved_17,
++  Dan32_OP_CMov,
++  Dan32_OP_Reserved_19,
++  Dan32_OP_Reserved_20,
++  Dan32_OP_Reserved_21,
++  Dan32_OP_Reserved_22,
++  Dan32_OP_Reserved_23,
++  Dan32_OP_In,
++  Dan32_OP_Out,
++  Dan32_OP_Read,
++  Dan32_OP_Write,
++  Dan32_OP_Reserved_28,
++  Dan32_OP_Reserved_29,
++  Dan32_OP_Reserved_30,
++  Dan32_OP_Halt
++};
++
++
++//  return the current value of a 32-bit register
++static ut32 register_value(const char* reg_name, RAnal *anal){
++  return r_reg_get_value(anal->reg, r_reg_get(anal->reg, reg_name, -1));
++}
++
++
++static int dan32_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, int len) {
++
++  //  Decode the big-endian opcode
++  ut8 big_end[4];
++  big_end[0] = data[3];
++  big_end[1] = data[2];
++  big_end[2] = data[1];
++  big_end[3] = data[0];
++  const ut32 dword = *(ut32*)big_end;
++
++  ut8 op_index = (dword >> 27);       // 5-bit opcode
++
++  //  Decode registers / arguments
++  ut8 edi = (dword >> 9 ) & SIX_BIT;  // 6-bit arg
++  ut8 esi = (dword >> 15) & SIX_BIT;  // 6-bit arg
++  ut8 ebp = (dword >> 21) & SIX_BIT;  // 6-bit arg
++
++  //  Initialize the op to some default values
++  memset(op, '\0', sizeof(RAnalOp));
++  op->id = op_index;
++  op->addr = addr;
++  op->size = 4;
++  op->nopcode = 1;
++  op->addr = addr;
++  op->jump = -1;
++  op->fail = -1;
++  op->ptr = -1;
++  op->val = -1;
++  op->type = R_ANAL_OP_TYPE_UNK;
++  op->family = R_ANAL_OP_FAMILY_CPU;
++
++  r_strbuf_init(&op->esil);
++  ut8 next_op = addr + op->size;
++  RReg *reg = anal->reg;
++
++  char *edi_reg = regs[edi].name;
++  char *esi_reg = regs[esi].name;
++  char *ebp_reg = regs[ebp].name;
++
++  //  Some scratch "registers"
++  ut32 eax = 0x0;
++  ut32 ecx = 0x0;
++
++  //  Let's see if we are altering EIP to cause jumps
++  bool eip_jump = ebp == EIP;
++
++  switch(op_index){
++    // load.x r17, [r01 + r03]
++    case Dan32_OP_Load_B:
++      ecx = register_value(edi_reg, anal);
++      eax = register_value(esi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_IND | R_ANAL_OP_TYPE_LOAD | R_ANAL_OP_TYPE_REG;
++      op->ptr = (ecx + eax) & 0xff;
++      r_strbuf_setf(&op->esil, "%s,%s,+,[1],%s,=", edi_reg, esi_reg, ebp_reg);
++
++      if(eip_jump){
++        op->type = R_ANAL_OP_TYPE_RJMP;
++        op->jump = op->ptr;
++        op->fail = next_op;
++      }
++      break;
++
++    case Dan32_OP_Load_H:
++      ecx = register_value(edi_reg, anal);
++      eax = register_value(esi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_IND | R_ANAL_OP_TYPE_LOAD | R_ANAL_OP_TYPE_REG;
++      op->ptr = (ecx + eax) & 0xffff;
++      r_strbuf_setf(&op->esil, "%s,%s,+,[2],%s,=", edi_reg, esi_reg, ebp_reg);
++
++      if(eip_jump){
++        op->type = R_ANAL_OP_TYPE_RJMP;
++        op->jump = op->ptr;
++        op->fail = next_op;
++      }
++      break;
++
++    case Dan32_OP_Load_W:
++      ecx = register_value(edi_reg, anal);
++      eax = register_value(esi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_IND | R_ANAL_OP_TYPE_LOAD | R_ANAL_OP_TYPE_REG;
++      op->ptr = (ecx + eax);
++      r_strbuf_setf(&op->esil, "%s,%s,+,[4],%s,=", edi_reg, esi_reg, ebp_reg);
++
++      if(eip_jump){
++        op->type = R_ANAL_OP_TYPE_RJMP;
++        op->jump = op->ptr;
++        op->fail = next_op;
++      }
++      break;
++
++    // store.x [r15 + r31], r02
++    case Dan32_OP_Store_B:
++      ecx = register_value(edi_reg, anal);
++      eax = register_value(esi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_IND | R_ANAL_OP_TYPE_STORE | R_ANAL_OP_TYPE_MEM | R_ANAL_OP_TYPE_REG;
++      op->ptr = (ecx + eax) & 0xff;
++
++      r_strbuf_setf(&op->esil, "%s,%s,%s,+,=[1]", ebp_reg, esi_reg, edi_reg);
++      break;
++
++    case Dan32_OP_Store_H:
++      ecx = register_value(edi_reg, anal);
++      eax = register_value(esi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_IND | R_ANAL_OP_TYPE_STORE | R_ANAL_OP_TYPE_MEM | R_ANAL_OP_TYPE_REG;
++      op->ptr = (ecx + eax) & 0xffff;
++      r_strbuf_setf(&op->esil, "%s,%s,%s,+,=[2]", ebp_reg, esi_reg, edi_reg);
++      break;
++
++    case Dan32_OP_Store_W:
++      ecx = register_value(edi_reg, anal);
++      eax = register_value(esi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_IND | R_ANAL_OP_TYPE_STORE | R_ANAL_OP_TYPE_MEM | R_ANAL_OP_TYPE_REG;
++      op->ptr = ecx + eax;
++      r_strbuf_setf(&op->esil, "%s,%s,%s,+,=[4]", ebp_reg, esi_reg, edi_reg);
++      break;
++
++    // add r23, r22, r57
++    case Dan32_OP_Add:
++      op->type = R_ANAL_OP_TYPE_ADD;
++      r_strbuf_setf(&op->esil, "%s,%s,+,%s,=", esi_reg, edi_reg, ebp_reg);
++
++      if(eip_jump){
++        ecx = register_value(edi_reg, anal);
++        eax = register_value(esi_reg, anal);
++        op->type = R_ANAL_OP_TYPE_JMP;
++        op->jump = eax + ecx;
++        op->fail = next_op;
++      }
++      break;
++
++    // mul r20, r00, r20
++    case Dan32_OP_Mul:
++      op->type = R_ANAL_OP_TYPE_MUL;
++      r_strbuf_setf(&op->esil, "%s,%s,*,%s,=", esi_reg, edi_reg, ebp_reg);
++
++      if(eip_jump){
++        ecx = register_value(edi_reg, anal);
++        eax = register_value(esi_reg, anal);
++        op->type = R_ANAL_OP_TYPE_JMP;
++        op->jump = eax * ecx;
++        op->fail = next_op;
++      }
++      break;
++
++    // div r20, r00, r20
++    case Dan32_OP_Div:
++      ecx = register_value(edi_reg, anal);
++      eax = register_value(esi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_DIV;
++      r_strbuf_setf(&op->esil, "%s,%s,/,%s,=", edi_reg, esi_reg, ebp_reg);
++
++      if(eip_jump && ecx != 0){
++        op->type = R_ANAL_OP_TYPE_JMP;
++        op->jump = eax / ecx;
++        op->fail = next_op;
++      }
++      break;
++
++    // nor r20, r00, r00
++    case Dan32_OP_Nor:
++      op->type = R_ANAL_OP_TYPE_NOR;
++
++      r_strbuf_setf(&op->esil, "%s,0xffffffff,^,%s,0xffffffff,^,&,%s,=", esi_reg, edi_reg, ebp_reg);
++
++      if(eip_jump){
++        ecx = register_value(edi_reg, anal);
++        eax = register_value(esi_reg, anal);
++        op->type = R_ANAL_OP_TYPE_JMP;
++        op->jump = (eax ^ 0xffffffff) & (ecx ^ 0xffffffff);
++        op->fail = next_op;
++      }
++      break;
++
++    // movi r57, 0xc
++    case Dan32_OP_MovI:
++      eax = dword;
++      ecx = dword;
++      eax >>= 5;
++      eax &= 0xffff;
++      ecx &= 037;
++      eax <<= (ecx & 0xff);
++      op->type = R_ANAL_OP_TYPE_MOV;
++      op->ptr = eax;
++      r_strbuf_setf(&op->esil, "0x%x,%s,=", eax, ebp_reg);
++
++      if(eip_jump){
++        op->type = R_ANAL_OP_TYPE_JMP;
++        op->jump = eax;
++        op->fail = next_op;
++      }
++      break;
++
++    // cmov eip, r57 if r23
++    case Dan32_OP_CMov:
++      ecx = register_value(edi_reg, anal);
++      eax = register_value(esi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_CMOV;
++      op->ptr = eax;
++      r_strbuf_setf(&op->esil, "%s,?{,%s,%s,=,}", edi_reg, esi_reg, ebp_reg);
++
++      if(eip_jump && ecx != 0){
++        op->type = R_ANAL_OP_TYPE_CJMP;  //  Maybe just JMP?
++        op->jump = register_value(ebp_reg, anal);
++        op->fail = next_op;
++      }
++      break;
++
++    // halt
++    case Dan32_OP_Halt:
++      op->eob = true;
++      op->type = R_ANAL_OP_TYPE_TRAP;
++      r_strbuf_setf(&op->esil, "BREAK");
++      break;
++
++    // in [r21]
++    case Dan32_OP_In:
++      ecx = register_value(edi_reg, anal);
++      eax = register_value(esi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_IO;
++      op->family = R_ANAL_OP_FAMILY_IO;
++      op->ptr = eax;
++
++      //  Just always read 0x69 for now
++      r_strbuf_setf(&op->esil, "0x69,%s,=[1]", esi_reg);
++      break;
++
++    // out r57
++    case Dan32_OP_Out:
++      op->type = R_ANAL_OP_TYPE_IO;
++      op->family = R_ANAL_OP_FAMILY_IO;
++      eax = register_value(ebp_reg, anal) & 0xff;
++      break;
++
++    // read [rbp], sector(rsi)
++    case Dan32_OP_Read:
++      eax = register_value(esi_reg, anal);
++      ecx = register_value(edi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_IO;
++      op->family = R_ANAL_OP_FAMILY_IO;
++      op->ptr = eax;
++
++      r_strbuf_setf(&op->esil, "0x0,r40,=,0x%x,%s,*,0x%x,+,r40,+,[8],%s,r40,+,=[8],0x8,r40,+=,0x%x,r40,==,!,?{,3,GOTO,}",
++          DAN32_SECTOR_SIZE, esi_reg, DAN32_DISK, ebp_reg, DAN32_SECTOR_SIZE);
++      break;
++
++    //  write sector(rsi), [rbp]
++    case Dan32_OP_Write:
++      ecx = register_value(edi_reg, anal);
++      eax = register_value(esi_reg, anal);
++      op->type = R_ANAL_OP_TYPE_IO;
++      op->family = R_ANAL_OP_FAMILY_IO;
++      op->ptr = eax;
++
++      r_strbuf_setf(&op->esil, "0x0,r40,=,%s,r40,+,[8],0x%x,esi,*,0x%x,+,r40,+,=[8],0x8,r40,+=,0x%x,r40,==,!,?{,3,GOTO,}",
++          ebp_reg, DAN32_SECTOR_SIZE, DAN32_DISK, DAN32_SECTOR_SIZE);
++      break;
++
++    case Dan32_OP_Reserved_3:  case Dan32_OP_Reserved_7:  case Dan32_OP_Reserved_12: case Dan32_OP_Reserved_13:
++    case Dan32_OP_Reserved_14: case Dan32_OP_Reserved_15: case Dan32_OP_Reserved_17: case Dan32_OP_Reserved_19:
++    case Dan32_OP_Reserved_20: case Dan32_OP_Reserved_21: case Dan32_OP_Reserved_22: case Dan32_OP_Reserved_23:
++    case Dan32_OP_Reserved_28: case Dan32_OP_Reserved_29: case Dan32_OP_Reserved_30:
++      op->type = R_ANAL_OP_TYPE_ILL;
++      break;
++  };
++
++  return op->size;
++}
++
++
++static int esil_dan32_init (RAnalEsil *esil) {
++  return true;
++}
++
++
++static int esil_dan32_fini (RAnalEsil *esil) {
++  return true;
++}
++
++
++RAnalPlugin r_anal_plugin_dan32 = {
++  .name = "dan32",
++  .desc = "Dan32 analysis plugin",
++  .license = "None",
++  .arch = "dan32",
++  .author = "safiire@irkenkitties.com",
++  .bits = 32,
++  .esil = true,
++  .op = &dan32_anal_op,
++  .set_reg_profile = &set_reg_profile,
++  .esil_init = esil_dan32_init,
++  .esil_fini = esil_dan32_fini
++};
++
++
++#ifndef CORELIB
++struct r_lib_struct_t radare_plugin = {
++  .type = R_LIB_TYPE_ANAL,
++  .data = &r_anal_plugin_dan32,
++  .version = R2_VERSION
++};
++#endif
+diff --git a/libr/anal/p/dan32.mk b/libr/anal/p/dan32.mk
+new file mode 100644
+index 0000000..1fa310b
+--- /dev/null
++++ b/libr/anal/p/dan32.mk
+@@ -0,0 +1,9 @@
++OBJ_DAN32=anal_dan32.o
++
++STATIC_OBJ+=$(OBJ_DAN32)
++TARGET_DAN32=anal_dan32.$(EXT_SO)
++
++ALL_TARTGETS+=$(TARGET_DAN32)
++
++$(TARGET_DAN32): $(OBJ_DAN32)
++	$(CC) $(call libname,anal_dan32) ${LDFLAGS} ${CFLAGS} -o anal_dan32.$(EXT_SO) $(OBJ_DAN32)
+diff --git a/libr/asm/p/Makefile b/libr/asm/p/Makefile
+index 8309f0a..4688c6b 100644
+--- a/libr/asm/p/Makefile
++++ b/libr/asm/p/Makefile
+@@ -23,6 +23,7 @@ ARCHS+=sh.mk arm_winedbg.mk tms320.mk gb.mk snes.mk ebc.mk malbolge.mk ws.mk
+ ARCHS+=6502.mk h8300.mk cr16.mk v850.mk spc700.mk propeller.mk msp430.mk i4004.mk
+ ARCHS+=lh5801.mk v810.mk mcs96.mk lm32.mk
+ ARCHS+=riscv.mk rsp.mk
++ARCHS+=dan32.mk
+ include $(ARCHS)
+ 
+ all: ${ALL_TARGETS}
+diff --git a/libr/asm/p/asm_dan32.c b/libr/asm/p/asm_dan32.c
+new file mode 100644
+index 0000000..0e2ec34
+--- /dev/null
++++ b/libr/asm/p/asm_dan32.c
+@@ -0,0 +1,222 @@
++#include <r_asm.h>
++#include <r_lib.h>
++
++#define EIP 63
++#define NUM_OPS 32
++#define SIX_BIT 077
++
++//  I don't even use this...
++static const struct {
++  char *name;
++} ops[NUM_OPS] = {
++  { "load.b"  },
++  { "load.h"  },
++  { "load.w"  },
++  { NULL      },
++  { "store.b" },
++  { "store.h" },
++  { "store.w" },
++  { NULL      },
++  { "add"     },
++  { "mul"     },
++  { "div"     },
++  { "nor"     },
++  { NULL      },
++  { NULL      },
++  { NULL      },
++  { NULL      },
++  { "movi"    },
++  { NULL      },
++  { "cmov"    },
++  { NULL      },
++  { NULL      },
++  { NULL      },
++  { NULL      },
++  { NULL      },
++  { "in"      },
++  { "out"     },
++  { "read"    },
++  { "write"   },
++  { NULL      },
++  { NULL      },
++  { NULL      },
++  { "halt"    }
++};
++
++
++static const struct {
++  char *name;
++} regs[] = {
++  { "r00" }, { "r01"  }, { "r02" }, { "r03" }, { "r04" }, { "r05" }, { "r06" }, { "r07" },
++  { "r08" }, { "r09"  }, { "r10" }, { "r11" }, { "r12" }, { "r13" }, { "r14" }, { "r15" },
++  { "r16" }, { "r17"  }, { "r18" }, { "r19" }, { "r20" }, { "r21" }, { "r22" }, { "r23" },
++  { "r24" }, { "r25"  }, { "r26" }, { "r27" }, { "r28" }, { "r29" }, { "r30" }, { "r31" },
++  { "r32" }, { "r33"  }, { "r34" }, { "r35" }, { "r36" }, { "r37" }, { "r38" }, { "r39" },
++  { "r40" }, { "r41"  }, { "r42" }, { "r43" }, { "r44" }, { "r45" }, { "r46" }, { "r47" },
++  { "r48" }, { "r49"  }, { "r50" }, { "r51" }, { "r52" }, { "r53" }, { "r54" }, { "r55" },
++  { "r56" }, { "r57"  }, { "r58" }, { "r59" }, { "r60" }, { "r61" }, { "esp" }, { "eip" }
++};
++
++
++static const char *size_suffixes[] = {"b", "h", "w"};
++
++static int disassemble(RAsm *a, RAsmOp *op, ut8 *buf, ut64 len) {
++
++  //  Initialize to invalid
++  snprintf(op->buf_asm, R_ASM_BUFSIZE, "invalid");
++  op->size = -1;
++
++  //  Decode the op
++  ut8 big_end[4];
++  big_end[0] = buf[3];
++  big_end[1] = buf[2];
++  big_end[2] = buf[1];
++  big_end[3] = buf[0];
++  ut32 dword = *(ut32*)big_end;
++
++  ut8 op_index = (dword >> 27);       // 5-bit opcode
++
++  //  Decode registers / arguments
++  ut8 edi = (dword >> 9 ) & SIX_BIT;  // 6-bit arg
++  ut8 esi = (dword >> 15) & SIX_BIT;  // 6-bit arg
++  ut8 ebp = (dword >> 21) & SIX_BIT;  // 6-bit arg
++
++  char *edi_reg = regs[edi].name;
++  char *esi_reg = regs[esi].name;
++  char *ebp_reg = regs[ebp].name;
++
++  //  Let's see if we are altering EIP to cause jumps
++  bool eip_jump = ebp == EIP;
++
++  //  Some scratch "registers"
++  ut32 eax = 0x0;
++  ut32 ecx = 0x0;
++
++  switch(op_index) {
++    case 0:
++    case 1:
++    case 2:
++      if(esi == 0 || edi == 0){
++        eax = esi | edi;
++        snprintf(op->buf_asm, R_ASM_BUFSIZE, "load.%s %s, [%s]", size_suffixes[op_index], ebp_reg, regs[eax].name);
++      }else{
++        snprintf(op->buf_asm, R_ASM_BUFSIZE, "load.%s %s, [%s + %s]", size_suffixes[op_index], ebp_reg, esi_reg, edi_reg);
++      }
++      op->size = 4;
++      break;
++
++    case 4:
++    case 5:
++    case 6:
++      if(esi == 0 || edi == 0){
++        eax = esi | edi;
++        snprintf(op->buf_asm, R_ASM_BUFSIZE, "store.%s [%s], %s", size_suffixes[op_index - 4], regs[eax].name, ebp_reg);
++      }else{
++        snprintf(op->buf_asm, R_ASM_BUFSIZE, "store.%s [%s + %s], %s", size_suffixes[op_index - 4], esi_reg, edi_reg, ebp_reg);
++      }
++      op->size = 4;
++      break;
++
++    case 8:
++      if(eip_jump){
++        if(esi == 0){
++          snprintf(op->buf_asm, R_ASM_BUFSIZE, "goto %s", edi_reg);
++        }else if(edi == 0){
++          snprintf(op->buf_asm, R_ASM_BUFSIZE, "goto %s", esi_reg);
++        }
++      }else{
++        snprintf(op->buf_asm, R_ASM_BUFSIZE, "add %s, %s, %s", ebp_reg, esi_reg, edi_reg);
++      }
++      op->size = 4;
++      break;
++
++    case 9:
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "mul %s, %s, %s", ebp_reg, esi_reg, edi_reg);
++      op->size = 4;
++      break;
++
++    case 10:
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "div %s, %s, %s", ebp_reg, esi_reg, edi_reg);
++      op->size = 4;
++      break;
++
++    case 11:
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "nor %s, %s, %s", ebp_reg, esi_reg, edi_reg);
++      op->size = 4;
++      break;
++
++    case 16:
++      eax = dword;
++      ecx = dword;
++      eax >>= 5;
++      eax &= 0xffff;
++      ecx &= 037;
++      eax <<= (ecx & 0xff);
++
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "movi %s, 0x%0x", ebp_reg, eax);
++      op->size = 4;
++      break;
++
++    case 18:
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "cmov %s, %s if %s", ebp_reg, esi_reg, edi_reg);
++      op->size = 4;
++      break;
++
++    case 24:
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "in %s", ebp_reg);
++      op->size = 4;
++      break;
++
++    case 25:
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "out %s", ebp_reg);
++      op->size = 4;
++      break;
++
++    case 26:
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "read [%s], sector(%s)", ebp_reg, esi_reg);
++      op->size = 4;
++      break;
++
++    case 27:
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "write sector(%s), [%s]", ebp_reg, esi_reg);
++      op->size = 4;
++      break;
++
++    case 31:
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "halt");
++      op->size = 4;
++      break;
++
++    case 3: case 7: case 12: case 13: case 14: case 15: case 17: case 19:
++    case 20: case 21: case 22: case 23: case 28: case 29: case 30:
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "!imp (%s, %s, %s)", ebp_reg, esi_reg, edi_reg);
++      op->size = -1;
++      break;
++  };
++
++  return op->size;
++}
++
++
++RAsmPlugin r_asm_plugin_dan32 = {
++  .name = "dan32",
++  .author = "safiire@irkenkitties.com",
++  .license = "None",
++  .desc = "Dan32 disassembler",
++  .arch = "dan32",
++  .endian = R_SYS_ENDIAN_BIG,
++  .bits = 32,
++  .init = NULL,
++  .fini = NULL,
++  .disassemble = &disassemble,
++  .modify = NULL,
++  .assemble = NULL,
++};
++
++
++#ifndef CORELIB
++struct r_lib_struct_t radare_plugin = {
++  .type = R_LIB_TYPE_ASM,
++  .data = &r_asm_plugin_dan32
++};
++#endif
+diff --git a/libr/asm/p/dan32.mk b/libr/asm/p/dan32.mk
+new file mode 100644
+index 0000000..1171293
+--- /dev/null
++++ b/libr/asm/p/dan32.mk
+@@ -0,0 +1,14 @@
++OBJ_DAN32=asm_dan32.o
++
++# myarch backend
++#OBJ_DAN32+=../arch/myarch/udis86/file1.o
++#OBJ_DAN32+=../arch/myarch/udis86/file2.o
++#[...]
++
++STATIC_OBJ+=${OBJ_DAN32}
++TARGET_DAN32=asm_dan32.${EXT_SO}
++
++ALL_TARGETS+=${TARGET_DAN32}
++
++${TARGET_DAN32}: ${OBJ_DAN32}
++	${CC} ${LDFLAGS} ${CFLAGS} -o ${TARGET_DAN32} ${OBJ_DAN32}
+diff --git a/libr/bin/p/Makefile b/libr/bin/p/Makefile
+index dd992a9..5363fd4 100644
+--- a/libr/bin/p/Makefile
++++ b/libr/bin/p/Makefile
+@@ -16,7 +16,7 @@ SHLR=$(LTOP)/../shlr
+ foo: all
+ 
+ ALL_TARGETS=
+-FORMATS=any.mk elf.mk elf64.mk pe.mk pe64.mk te.mk mach0.mk
++FORMATS=any.mk elf.mk elf64.mk dan32.mk pe.mk pe64.mk te.mk mach0.mk
+ FORMATS+=bios.mk mach064.mk fatmach0.mk dyldcache.mk java.mk
+ FORMATS+=dex.mk fs.mk ningb.mk coff.mk ningba.mk xbe.mk zimg.mk
+ FORMATS+=omf.mk cgc.mk dol.mk nes.mk mbn.mk psxexe.mk spc700.mk
+diff --git a/libr/bin/p/bin_dan32.c b/libr/bin/p/bin_dan32.c
+new file mode 100644
+index 0000000..48a1df2
+--- /dev/null
++++ b/libr/bin/p/bin_dan32.c
+@@ -0,0 +1,246 @@
++#include <r_bin.h>
++#include <r_lib.h>
++
++#define DAN32_BASE_ADDRESS (0x00000000LL)
++#define DAN32_STACK_END    (0x00100000LL)
++#define DAN32_DISK_ADDRESS (0x00200000LL)
++#define DAN32_MAGIC        "\x87\xe0\x01\x80\xa2\x00\xe0\x87\xc2\x8d\x89\x21\x87\xe0\x02\xa3"
++
++
++//  Trace some info from RBinFile
++static void trace(RBinFile *arch){
++  eprintf("RBinFile struct:\n");
++  eprintf("\tfile: %s\n", arch->file);
++  eprintf("\tfd: %d\n", arch->fd);
++  eprintf("\tsize %d\n", arch->size);
++  eprintf("\trawstr %d\n", arch->rawstr);
++  eprintf("\tid: %d\n", arch->id);
++  eprintf("\toffset: %d\n", arch->offset);
++  eprintf("\tloadaddr: 0x%x\n", arch->loadaddr);
++  eprintf("\tsdb? 0x%x\n", arch->sdb);
++  eprintf("\tsdb_info? 0x%x\n", arch->sdb_info);
++  eprintf("\tsdb_addrinfo? 0x%x\n", arch->sdb_addrinfo);
++}
++
++
++static void *load_bytes(RBinFile *arch, const ut8 *buf, ut64 size, ut64 loadaddr, Sdb *sdb){
++  return R_NOTNULL;
++}
++
++
++//  I will just check the first 16 bytes are from this one exact file
++static bool check_bytes(const ut8 *buf, ut64 length){
++  if(!buf) return false;
++  return memcmp(buf, DAN32_MAGIC, 0x10) == 0;
++}
++
++
++//  See if it even calls load
++static bool load(RBinFile *arch){
++  const ut8 *bytes = arch ? r_buf_buffer(arch->buf) : NULL;
++  ut64 size = arch ? r_buf_size(arch->buf) : 0;
++
++  if (!arch || !arch->o) return false;
++  arch->o->bin_obj = load_bytes(arch, bytes, size, arch->o->loadaddr, arch->sdb);
++  return check_bytes (bytes, size);
++}
++
++
++//  Clean up
++static int destroy(RBinFile *arch) {
++  r_buf_free(arch->buf);
++  arch->buf = NULL;
++  return true;
++}
++
++
++//  Return the base address
++static ut64 baddr(RBinFile *arch) {
++  return DAN32_BASE_ADDRESS;
++}
++
++
++static RList *memory(RBinFile *arch){
++  RList *mem_list;
++  if(!(mem_list = r_list_new())) return NULL;
++  mem_list->free = free;
++
++  RBinMem *sram = R_NEW0(RBinMem);
++  if(!sram) return mem_list;
++  sram->name = strdup("sram");
++  sram->addr = DAN32_BASE_ADDRESS;
++  sram->size = 0x7503;
++  sram->perms = r_str_rwx("rwx");
++  r_list_append(mem_list, sram);
++
++  RBinMem *diskrom = R_NEW0(RBinMem);
++  if(!diskrom) return mem_list;
++  diskrom->name = strdup("diskrom");
++  diskrom->addr = DAN32_DISK_ADDRESS;
++  diskrom->size = 0x7503;
++  diskrom->perms = r_str_rwx("r--");
++  r_list_append(mem_list, diskrom);
++
++  return mem_list;
++}
++
++
++static RList* entries(RBinFile *arch){
++  RList *entry_list;
++  if(!(entry_list = r_list_new())) return NULL;
++  entry_list->free = free;
++
++  RBinAddr *entry = R_NEW0(RBinAddr);
++  if(!entry) return entry_list;
++  entry->paddr = DAN32_BASE_ADDRESS;
++  entry->vaddr = DAN32_BASE_ADDRESS;
++  r_list_append(entry_list, entry);
++
++  return entry_list;
++}
++
++
++//  Label some important symbols in this program
++static RList* symbols(RBinFile *arch) {
++  RList *symbol_list;
++  if(!(symbol_list = r_list_new())) return NULL;
++  symbol_list->free = free;
++
++  //  Entrypoint
++  RBinSymbol *symbol = R_NEW0(RBinSymbol);
++  if(!symbol) return symbol_list;
++  symbol->name = r_str_newf("entry");
++  symbol->paddr = DAN32_BASE_ADDRESS;
++  symbol->vaddr = DAN32_BASE_ADDRESS;
++  symbol->size = 1;
++  symbol->ordinal = 0;
++  r_list_append(symbol_list, symbol);
++
++  return symbol_list;
++}
++
++
++//  Create the section outlined in my analysis
++static RList* sections(RBinFile *arch) {
++  RList *section_list;
++  RBinSection *section;
++  if(!(section_list = r_list_new())) return NULL;
++  section_list->free = free;
++
++  //  .text (rwx)
++  section = R_NEW0(RBinSection);
++  if(!section) return section_list;
++
++  strcpy(section->name, ".text");
++  section->paddr = DAN32_BASE_ADDRESS;
++  section->vaddr = DAN32_BASE_ADDRESS;
++  section->size  = 0x92b;
++  section->vsize = 0x92b;
++  section->srwx =  r_str_rwx("mrwx");
++  section->add = true;
++  r_list_append(section_list, section);
++
++  //  .bss (rw-)
++  section = R_NEW0(RBinSection);
++  if(!section) return section_list;
++
++  strcpy(section->name, ".bss");
++  section->paddr = 0x92c;
++  section->vaddr = 0x92c;
++  section->size  = 0x24d;
++  section->vsize = 0x24d;
++  section->srwx =  r_str_rwx("mrw-");
++  section->add = true;
++  r_list_append(section_list, section);
++
++  //  .encrypted (rw-)
++  section = R_NEW0(RBinSection);
++  if(!section) return section_list;
++
++  strcpy(section->name, ".encrypted");
++  section->paddr = 0xc00;
++  section->vaddr = 0xc00;
++  section->size  = 0x6903;
++  section->vsize = 0x6903;
++  section->srwx =  r_str_rwx("mrw-");
++  section->add = true;
++  r_list_append(section_list, section);
++
++  // .stack section (rw-)
++  section = R_NEW0(RBinSection);
++  if(!section) return section_list;
++
++  strcpy(section->name, ".stack");
++  section->vaddr = DAN32_STACK_END - 0x400;
++  section->size  = 0x400;
++  section->vsize = 0x400;
++  section->srwx =  r_str_rwx("mrw-");
++  section->add = true;
++  r_list_append(section_list, section);
++
++  //  I will label the disk sectors as symbols
++  // .rodata section (r--)
++  section = R_NEW0(RBinSection);
++  if(!section) return section_list;
++
++  strcpy(section->name, ".diskrom");
++  section->paddr = DAN32_BASE_ADDRESS;
++  section->vaddr = DAN32_DISK_ADDRESS;
++  section->size  = arch->size;
++  section->vsize = arch->size;
++  section->srwx =  r_str_rwx("mr--");
++  section->add = true;
++  r_list_append(section_list, section);
++
++  return section_list;
++}
++
++
++static RBinInfo *info(RBinFile *arch){
++  RBinInfo *ret = R_NEW0(RBinInfo);
++  if(!ret) return NULL;
++
++  ret->file = arch->file ? strdup(arch->file) : NULL;
++  ret->type = strdup("Image");
++  ret->bclass = strdup("Disk Image (Encrypted)");
++  ret->cpu = strdup("Dan32");
++  ret->arch = strdup ("dan32");
++  ret->os = strdup("any");
++  ret->lang = "Hexidecimal++";
++  ret->bits = 32;
++  ret->has_va = true;
++  ret->big_endian = true;
++  ret->has_pi = false;
++  ret->has_canary = false;
++  ret->has_nx = false;
++  ret->has_crypto = true;
++  //ret->baddr = DAN32_DISK_ADDRESS;   //  ???
++  return ret;
++}
++
++
++RBinPlugin r_bin_plugin_dan32 = {
++  .name = "dan32",
++  .author = "safiire@irkenkitties.com",
++  .desc = "Danish 32-bit CTF Virtual Machine",
++  .license = "None",
++  .load = &load,
++  .load_bytes = &load_bytes,
++  .destroy = &destroy,
++  .check_bytes = &check_bytes,
++  .baddr = &baddr,
++  .symbols = &symbols,
++  .sections = &sections,
++  .entries = &entries,
++  .info = &info,
++  .mem = &memory,
++  //.binsym = &binsym,
++};
++
++#ifndef CORELIB
++RLibStruct radare_plugin = {
++  .type = R_LIB_TYPE_BIN,
++  .data = &r_bin_plugin_dan32,
++  .version = R2_VERSION
++};
++#endif
+diff --git a/libr/bin/p/dan32.mk b/libr/bin/p/dan32.mk
+new file mode 100644
+index 0000000..6377c11
+--- /dev/null
++++ b/libr/bin/p/dan32.mk
+@@ -0,0 +1,10 @@
++OBJ_DAN32=bin_dan32.o
++
++STATIC_OBJ+=${OBJ_DAN32}
++TARGET_DAN32=bin_dan32.${EXT_SO}
++
++ALL_TARGETS+=${TARGET_DAN32}
++
++${TARGET_DAN32}: ${OBJ_DAN32}
++	${CC} $(call libname,bin_dan32) -shared ${CFLAGS} \
++		-o ${TARGET_DAN32} ${OBJ_DAN32} $(LINK) $(LDFLAGS)
+diff --git a/libr/include/r_anal.h b/libr/include/r_anal.h
+index 761827e..da5b2a2 100644
+--- a/libr/include/r_anal.h
++++ b/libr/include/r_anal.h
+@@ -1635,6 +1635,8 @@ extern RAnalPlugin r_anal_plugin_i4004;
+ extern RAnalPlugin r_anal_plugin_xtensa;
+ extern RAnalPlugin r_anal_plugin_pic18c;
+ extern RAnalPlugin r_anal_plugin_rsp;
++extern RAnalPlugin r_anal_plugin_dan32;
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/libr/include/r_asm.h b/libr/include/r_asm.h
+index f420268..bfa29d2 100644
+--- a/libr/include/r_asm.h
++++ b/libr/include/r_asm.h
+@@ -249,6 +249,7 @@ extern RAsmPlugin r_asm_plugin_rsp;
+ extern RAsmPlugin r_asm_plugin_hexagon_gnu;
+ extern RAsmPlugin r_asm_plugin_wasm;
+ extern RAsmPlugin r_asm_plugin_tms320c64x;
++extern RAsmPlugin r_asm_plugin_dan32;
+ 
+ #endif
+ 
+diff --git a/libr/include/r_bin.h b/libr/include/r_bin.h
+index 89a65bd..aff39c0 100644
+--- a/libr/include/r_bin.h
++++ b/libr/include/r_bin.h
+@@ -706,6 +706,7 @@ extern RBinPlugin r_bin_plugin_menuet;
+ extern RBinPlugin r_bin_plugin_wasm;
+ extern RBinPlugin r_bin_plugin_nro;
+ extern RBinPlugin r_bin_plugin_sfc;
++extern RBinPlugin r_bin_plugin_dan32;
+ 
+ #ifdef __cplusplus
+ }
+diff --git a/plugins.def.cfg b/plugins.def.cfg
+index bea68cb..9a547b9 100644
+--- a/plugins.def.cfg
++++ b/plugins.def.cfg
+@@ -10,6 +10,7 @@ anal.cris
+ anal.dalvik
+ anal.ebc
+ anal.gb
++anal.dan32
+ anal.h8300
+ anal.i8080
+ anal.java
+@@ -100,6 +101,7 @@ asm.v810
+ asm.vax
+ asm.mcs96
+ asm.pic18c
++asm.dan32
+ bin.any
+ bin.wasm
+ bin.nro
