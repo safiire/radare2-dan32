@@ -1,5 +1,5 @@
 diff --git a/libr/anal/p/Makefile b/libr/anal/p/Makefile
-index 11bb802..be8806c 100644
+index 11bb802bb..be8806c0e 100644
 --- a/libr/anal/p/Makefile
 +++ b/libr/anal/p/Makefile
 @@ -12,7 +12,7 @@ all: ${ALL_TARGETS} ;
@@ -13,10 +13,10 @@ index 11bb802..be8806c 100644
  clean:
 diff --git a/libr/anal/p/anal_dan32.c b/libr/anal/p/anal_dan32.c
 new file mode 100644
-index 0000000..e094499
+index 000000000..44749a493
 --- /dev/null
 +++ b/libr/anal/p/anal_dan32.c
-@@ -0,0 +1,390 @@
+@@ -0,0 +1,392 @@
 +#include <string.h>
 +#include <r_types.h>
 +#include <r_lib.h>
@@ -328,18 +328,19 @@ index 0000000..e094499
 +      op->family = R_ANAL_OP_FAMILY_IO;
 +      op->ptr = eax;
 +
-+      //  Just always read 0x69 for now
-+      r_strbuf_setf(&op->esil, "0x69,%s,=[1]", esi_reg);
++      //  Just always read \n for now
++      r_strbuf_setf(&op->esil, "0x0a,%s,=[1]", esi_reg);
 +      break;
 +
 +    // out r57
 +    case Dan32_OP_Out:
 +      op->type = R_ANAL_OP_TYPE_IO;
 +      op->family = R_ANAL_OP_FAMILY_IO;
-+      eax = register_value(ebp_reg, anal) & 0xff;
++      r_strbuf_setf(&op->esil, "%s,$", ebp_reg);
 +      break;
 +
 +    // read [rbp], sector(rsi)
++    // read 0x200 bytes from sector(rsi) to the memory address in rbp
 +    case Dan32_OP_Read:
 +      eax = register_value(esi_reg, anal);
 +      ecx = register_value(edi_reg, anal);
@@ -351,7 +352,8 @@ index 0000000..e094499
 +          DAN32_SECTOR_SIZE, esi_reg, DAN32_DISK, ebp_reg, DAN32_SECTOR_SIZE);
 +      break;
 +
-+    //  write sector(rsi), [rbp]
++    //  write [rsi], sector(rbp) <--- this was backwards
++    //  write 0x200 bytes from the memory address in rbp to sector(rsi)
 +    case Dan32_OP_Write:
 +      ecx = register_value(edi_reg, anal);
 +      eax = register_value(esi_reg, anal);
@@ -359,8 +361,8 @@ index 0000000..e094499
 +      op->family = R_ANAL_OP_FAMILY_IO;
 +      op->ptr = eax;
 +
-+      r_strbuf_setf(&op->esil, "0x0,r40,=,%s,r40,+,[8],0x%x,esi,*,0x%x,+,r40,+,=[8],0x8,r40,+=,0x%x,r40,==,!,?{,3,GOTO,}",
-+          ebp_reg, DAN32_SECTOR_SIZE, DAN32_DISK, DAN32_SECTOR_SIZE);
++      r_strbuf_setf(&op->esil, "0x0,r40,=,%s,r40,+,[8],0x%x,%s,*,0x%x,+,r40,+,=[8],0x8,r40,+=,0x%x,r40,==,!,?{,3,GOTO,}",
++          ebp_reg, DAN32_SECTOR_SIZE, esi_reg, DAN32_DISK, DAN32_DISK);
 +      break;
 +
 +    case Dan32_OP_Reserved_3:  case Dan32_OP_Reserved_7:  case Dan32_OP_Reserved_12: case Dan32_OP_Reserved_13:
@@ -409,7 +411,7 @@ index 0000000..e094499
 +#endif
 diff --git a/libr/anal/p/dan32.mk b/libr/anal/p/dan32.mk
 new file mode 100644
-index 0000000..1fa310b
+index 000000000..1fa310b57
 --- /dev/null
 +++ b/libr/anal/p/dan32.mk
 @@ -0,0 +1,9 @@
@@ -423,7 +425,7 @@ index 0000000..1fa310b
 +$(TARGET_DAN32): $(OBJ_DAN32)
 +	$(CC) $(call libname,anal_dan32) ${LDFLAGS} ${CFLAGS} -o anal_dan32.$(EXT_SO) $(OBJ_DAN32)
 diff --git a/libr/asm/p/Makefile b/libr/asm/p/Makefile
-index 8309f0a..4688c6b 100644
+index 8309f0ab3..4688c6b04 100644
 --- a/libr/asm/p/Makefile
 +++ b/libr/asm/p/Makefile
 @@ -23,6 +23,7 @@ ARCHS+=sh.mk arm_winedbg.mk tms320.mk gb.mk snes.mk ebc.mk malbolge.mk ws.mk
@@ -436,7 +438,7 @@ index 8309f0a..4688c6b 100644
  all: ${ALL_TARGETS}
 diff --git a/libr/asm/p/asm_dan32.c b/libr/asm/p/asm_dan32.c
 new file mode 100644
-index 0000000..0e2ec34
+index 000000000..b17aa2909
 --- /dev/null
 +++ b/libr/asm/p/asm_dan32.c
 @@ -0,0 +1,222 @@
@@ -620,7 +622,7 @@ index 0000000..0e2ec34
 +      break;
 +
 +    case 27:
-+      snprintf(op->buf_asm, R_ASM_BUFSIZE, "write sector(%s), [%s]", ebp_reg, esi_reg);
++      snprintf(op->buf_asm, R_ASM_BUFSIZE, "write [%s], sector(%s)", ebp_reg, esi_reg);
 +      op->size = 4;
 +      break;
 +
@@ -664,7 +666,7 @@ index 0000000..0e2ec34
 +#endif
 diff --git a/libr/asm/p/dan32.mk b/libr/asm/p/dan32.mk
 new file mode 100644
-index 0000000..1171293
+index 000000000..1171293cb
 --- /dev/null
 +++ b/libr/asm/p/dan32.mk
 @@ -0,0 +1,14 @@
@@ -683,7 +685,7 @@ index 0000000..1171293
 +${TARGET_DAN32}: ${OBJ_DAN32}
 +	${CC} ${LDFLAGS} ${CFLAGS} -o ${TARGET_DAN32} ${OBJ_DAN32}
 diff --git a/libr/bin/p/Makefile b/libr/bin/p/Makefile
-index dd992a9..5363fd4 100644
+index dd992a93b..5363fd49f 100644
 --- a/libr/bin/p/Makefile
 +++ b/libr/bin/p/Makefile
 @@ -16,7 +16,7 @@ SHLR=$(LTOP)/../shlr
@@ -697,10 +699,10 @@ index dd992a9..5363fd4 100644
  FORMATS+=omf.mk cgc.mk dol.mk nes.mk mbn.mk psxexe.mk spc700.mk
 diff --git a/libr/bin/p/bin_dan32.c b/libr/bin/p/bin_dan32.c
 new file mode 100644
-index 0000000..48a1df2
+index 000000000..ec35a06b7
 --- /dev/null
 +++ b/libr/bin/p/bin_dan32.c
-@@ -0,0 +1,246 @@
+@@ -0,0 +1,248 @@
 +#include <r_bin.h>
 +#include <r_lib.h>
 +
@@ -708,6 +710,7 @@ index 0000000..48a1df2
 +#define DAN32_STACK_END    (0x00100000LL)
 +#define DAN32_DISK_ADDRESS (0x00200000LL)
 +#define DAN32_MAGIC        "\x87\xe0\x01\x80\xa2\x00\xe0\x87\xc2\x8d\x89\x21\x87\xe0\x02\xa3"
++#define DAN32_MAGIC2       "\x47\xbf\x80\x00\x87\x20\x00\x22\x5f\x3c\xf2\x00\x47\xbe\xf2\x00"
 +
 +
 +//  Trace some info from RBinFile
@@ -734,7 +737,8 @@ index 0000000..48a1df2
 +//  I will just check the first 16 bytes are from this one exact file
 +static bool check_bytes(const ut8 *buf, ut64 length){
 +  if(!buf) return false;
-+  return memcmp(buf, DAN32_MAGIC, 0x10) == 0;
++  return memcmp(buf, DAN32_MAGIC, 0x10) == 0 ||
++         memcmp(buf, DAN32_MAGIC2, 0x10) == 0;
 +}
 +
 +
@@ -949,7 +953,7 @@ index 0000000..48a1df2
 +#endif
 diff --git a/libr/bin/p/dan32.mk b/libr/bin/p/dan32.mk
 new file mode 100644
-index 0000000..6377c11
+index 000000000..6377c11d2
 --- /dev/null
 +++ b/libr/bin/p/dan32.mk
 @@ -0,0 +1,10 @@
@@ -964,10 +968,10 @@ index 0000000..6377c11
 +	${CC} $(call libname,bin_dan32) -shared ${CFLAGS} \
 +		-o ${TARGET_DAN32} ${OBJ_DAN32} $(LINK) $(LDFLAGS)
 diff --git a/libr/include/r_anal.h b/libr/include/r_anal.h
-index 761827e..da5b2a2 100644
+index d057a59da..112d67402 100644
 --- a/libr/include/r_anal.h
 +++ b/libr/include/r_anal.h
-@@ -1635,6 +1635,8 @@ extern RAnalPlugin r_anal_plugin_i4004;
+@@ -1656,6 +1656,8 @@ extern RAnalPlugin r_anal_plugin_i4004;
  extern RAnalPlugin r_anal_plugin_xtensa;
  extern RAnalPlugin r_anal_plugin_pic18c;
  extern RAnalPlugin r_anal_plugin_rsp;
@@ -977,22 +981,22 @@ index 761827e..da5b2a2 100644
  }
  #endif
 diff --git a/libr/include/r_asm.h b/libr/include/r_asm.h
-index f420268..bfa29d2 100644
+index 1249eb0ae..3995ae1d3 100644
 --- a/libr/include/r_asm.h
 +++ b/libr/include/r_asm.h
-@@ -249,6 +249,7 @@ extern RAsmPlugin r_asm_plugin_rsp;
+@@ -252,6 +252,7 @@ extern RAsmPlugin r_asm_plugin_rsp;
  extern RAsmPlugin r_asm_plugin_hexagon_gnu;
  extern RAsmPlugin r_asm_plugin_wasm;
  extern RAsmPlugin r_asm_plugin_tms320c64x;
 +extern RAsmPlugin r_asm_plugin_dan32;
+ extern RAsmPlugin r_asm_plugin_evm;
  
  #endif
- 
 diff --git a/libr/include/r_bin.h b/libr/include/r_bin.h
-index 89a65bd..aff39c0 100644
+index d75ea0892..bd73c3797 100644
 --- a/libr/include/r_bin.h
 +++ b/libr/include/r_bin.h
-@@ -706,6 +706,7 @@ extern RBinPlugin r_bin_plugin_menuet;
+@@ -711,6 +711,7 @@ extern RBinPlugin r_bin_plugin_menuet;
  extern RBinPlugin r_bin_plugin_wasm;
  extern RBinPlugin r_bin_plugin_nro;
  extern RBinPlugin r_bin_plugin_sfc;
@@ -1001,7 +1005,7 @@ index 89a65bd..aff39c0 100644
  #ifdef __cplusplus
  }
 diff --git a/plugins.def.cfg b/plugins.def.cfg
-index bea68cb..9a547b9 100644
+index 996de05bb..f202849bd 100644
 --- a/plugins.def.cfg
 +++ b/plugins.def.cfg
 @@ -10,6 +10,7 @@ anal.cris
@@ -1012,7 +1016,7 @@ index bea68cb..9a547b9 100644
  anal.h8300
  anal.i8080
  anal.java
-@@ -100,6 +101,7 @@ asm.v810
+@@ -101,6 +102,7 @@ asm.v810
  asm.vax
  asm.mcs96
  asm.pic18c

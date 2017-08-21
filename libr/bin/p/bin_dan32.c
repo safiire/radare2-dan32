@@ -5,6 +5,7 @@
 #define DAN32_STACK_END    (0x00100000LL)
 #define DAN32_DISK_ADDRESS (0x00200000LL)
 #define DAN32_MAGIC        "\x87\xe0\x01\x80\xa2\x00\xe0\x87\xc2\x8d\x89\x21\x87\xe0\x02\xa3"
+#define DAN32_MAGIC2       "\x47\xbf\x80\x00\x87\x20\x00\x22\x5f\x3c\xf2\x00\x47\xbe\xf2\x00"
 
 
 //  Trace some info from RBinFile
@@ -31,7 +32,8 @@ static void *load_bytes(RBinFile *arch, const ut8 *buf, ut64 size, ut64 loadaddr
 //  I will just check the first 16 bytes are from this one exact file
 static bool check_bytes(const ut8 *buf, ut64 length){
   if(!buf) return false;
-  return memcmp(buf, DAN32_MAGIC, 0x10) == 0;
+  return memcmp(buf, DAN32_MAGIC, 0x10) == 0 ||
+         memcmp(buf, DAN32_MAGIC2, 0x10) == 0;
 }
 
 

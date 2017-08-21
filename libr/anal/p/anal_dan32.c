@@ -309,18 +309,19 @@ static int dan32_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
       op->family = R_ANAL_OP_FAMILY_IO;
       op->ptr = eax;
 
-      //  Just always read 0x69 for now
-      r_strbuf_setf(&op->esil, "0x69,%s,=[1]", esi_reg);
+      //  Just always read \n for now
+      r_strbuf_setf(&op->esil, "0x0a,%s,=[1]", esi_reg);
       break;
 
     // out r57
     case Dan32_OP_Out:
       op->type = R_ANAL_OP_TYPE_IO;
       op->family = R_ANAL_OP_FAMILY_IO;
-      eax = register_value(ebp_reg, anal) & 0xff;
+      r_strbuf_setf(&op->esil, "%s,$", ebp_reg);
       break;
 
     // read [rbp], sector(rsi)
+    // read 0x200 bytes from sector(rsi) to the memory address in rbp
     case Dan32_OP_Read:
       eax = register_value(esi_reg, anal);
       ecx = register_value(edi_reg, anal);
@@ -332,7 +333,8 @@ static int dan32_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
           DAN32_SECTOR_SIZE, esi_reg, DAN32_DISK, ebp_reg, DAN32_SECTOR_SIZE);
       break;
 
-    //  write sector(rsi), [rbp]
+    //  write [rsi], sector(rbp) <--- this was backwards
+    //  write 0x200 bytes from the memory address in rbp to sector(rsi)
     case Dan32_OP_Write:
       ecx = register_value(edi_reg, anal);
       eax = register_value(esi_reg, anal);
@@ -340,8 +342,8 @@ static int dan32_anal_op(RAnal *anal, RAnalOp *op, ut64 addr, const ut8 *data, i
       op->family = R_ANAL_OP_FAMILY_IO;
       op->ptr = eax;
 
-      r_strbuf_setf(&op->esil, "0x0,r40,=,%s,r40,+,[8],0x%x,esi,*,0x%x,+,r40,+,=[8],0x8,r40,+=,0x%x,r40,==,!,?{,3,GOTO,}",
-          ebp_reg, DAN32_SECTOR_SIZE, DAN32_DISK, DAN32_SECTOR_SIZE);
+      r_strbuf_setf(&op->esil, "0x0,r40,=,%s,r40,+,[8],0x%x,%s,*,0x%x,+,r40,+,=[8],0x8,r40,+=,0x%x,r40,==,!,?{,3,GOTO,}",
+          ebp_reg, DAN32_SECTOR_SIZE, esi_reg, DAN32_DISK, DAN32_DISK);
       break;
 
     case Dan32_OP_Reserved_3:  case Dan32_OP_Reserved_7:  case Dan32_OP_Reserved_12: case Dan32_OP_Reserved_13:

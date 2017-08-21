@@ -178,7 +178,7 @@ static int disassemble(RAsm *a, RAsmOp *op, ut8 *buf, ut64 len) {
       break;
 
     case 27:
-      snprintf(op->buf_asm, R_ASM_BUFSIZE, "write sector(%s), [%s]", ebp_reg, esi_reg);
+      snprintf(op->buf_asm, R_ASM_BUFSIZE, "write [%s], sector(%s)", ebp_reg, esi_reg);
       op->size = 4;
       break;
 
