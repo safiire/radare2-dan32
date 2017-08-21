@@ -18,3 +18,10 @@ Here's a good quality image of the puzzle as it was given.
 I solved this puzzle recently, and did an in-depth write up of it, that can be found here:
 
 https://safiire.github.io/blog/2017/08/19/solving-danish-defense-intelligence-puzzle/
+
+
+###  Standalone Plugins
+These come in the form of a patch to the Radare2 master branch, however I should be able to separate them
+and have them compile separately from radare itself.  I will update these, and perhaps get them included
+in radare-extras repo, or so they can be installed with radare's package manager.
+
